@@ -1,0 +1,198 @@
+services:
+  # accounts:
+  #   build:
+  #     context: ./accounts
+  #     dockerfile: Dockerfile
+  #   container_name: accounts-goodfood-ms
+  #   ports:
+  #     - "4001:4001"
+  #   environment:
+  #     - PORT=4001
+  #     - HOST=0.0.0.0
+  #   networks:
+  #     - goodfood
+  #   volumes:
+  #     - ./accounts:/app
+
+  # messages:
+  #   build:
+  #     context: ./messages
+  #     dockerfile: Dockerfile
+  #   container_name: messages-goodfood-ms
+  #   depends_on:
+  #     broker:
+  #       condition: service_healthy
+  #   ports:
+  #     - "4003:4003"
+  #   environment:
+  #     - PORT=4003
+  #     - HOST=0.0.0.0
+  #   networks:
+  #     - goodfood
+  #   volumes:
+  #     - ./messages:/app
+
+  # authenfication:
+  #   env_file: ./.env
+  #   depends_on:
+  #     broker:
+  #       condition: service_healthy
+  #   build:
+  #     context: ./authentication
+  #     dockerfile: Dockerfile
+  #   container_name: authentication-ms
+  #   ports:
+  #     - "4000:4000"
+  #   environment:
+  #     - DATABASE_URL=postgresql://${POSTGRESDB_USER}:${POSTGRESDB_ROOT_PASSWORD}@authenticationdb:5432/${POSTGRESDB_DATABASE}
+  #   networks:
+  #     - goodfood
+  #   volumes:
+  #     - ./authentication:/app
+  # authenticationdb:
+  #   image: postgres
+  #   restart: unless-stopped
+  #   env_file: ./.env
+  #   environment:
+  #     - POSTGRES_USER=$POSTGRESDB_USER
+  #     - POSTGRES_PASSWORD=$POSTGRESDB_ROOT_PASSWORD
+  #     - POSTGRES_DB=$POSTGRESDB_DATABASE
+  #   ports:
+  #     - 5432:5432
+  #   command: postgres -c listen_addresses='*'
+  #   networks:
+  #     - goodfood
+  #   volumes:
+  #     - db:/var/lib/postgres/data
+
+  # apigateway:
+  #   build:
+  #     context: ./apigateway
+  #     dockerfile: Dockerfile
+  #   container_name: apigateway-ms
+  #   ports:
+  #     - "4002:4002"
+  #   networks:
+  #     - goodfood
+  #   volumes:
+  #     - ./apigateway:/app
+
+  # zookeeper:
+  #   image: confluentinc/cp-zookeeper:6.2.0
+  #   container_name: zookeeper
+  #   environment:
+  #     ZOOKEEPER_CLIENT_PORT: 2181
+  #     ZOOKEEPER_TICK_TIME: 2000
+  #   networks:
+  #     - goodfood
+
+  # broker:
+  #   image: confluentinc/cp-kafka:6.2.0
+  #   container_name: broker
+  #   ports:
+  #     - "9092:9092"
+  #   depends_on:
+  #     - zookeeper
+  #   environment:
+  #     KAFKA_BROKER_ID: 1
+  #     KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+  #     KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+  #     KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://broker:29092
+  #     KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+  #     KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+  #     KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "kafka-topics --bootstrap-server broker:29092 --list"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - goodfood
+
+  movies:
+    build:
+      context: ./movies
+      dockerfile: Dockerfile
+    container_name: movies-goodfood-ms
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "4004:4004"
+    environment:
+      - PORT=4004
+      - MONGODB_URL=mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongodb:27017
+    networks:
+      - goodfood
+    volumes:
+      - ./movies:/app
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    hostname: mongodb
+    env_file:
+      - .env
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mongosh",
+          "admin",
+          "--port",
+          "27017",
+          "-u",
+          "${MONGO_INITDB_ROOT_USERNAME}",
+          "-p",
+          "${MONGO_INITDB_ROOT_PASSWORD}",
+          "--eval",
+          "db.stats()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./mongodb/initdb.d/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+      - mongodb-data:/data/db/
+      - mongodb-log:/var/log/mongodb/
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+    ports:
+      - "27018:27017"
+    networks:
+      - goodfood
+
+  mongo-express:
+    image: mongo-express:latest
+    container_name: mongo-express
+    restart: always
+    env_file:
+      - .env
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongodb:27017
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_MONGODB_SERVER: "mongodb"
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USERNAME}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD}
+    ports:
+      - 8081:8081
+    networks:
+      - goodfood
+    depends_on:
+      - mongodb
+
+volumes:
+  db:
+  mongodb-data:
+    driver: local
+    name: mongo-data
+  mongodb-log:
+    driver: local
+    name: mongo-log
+
+networks:
+  goodfood:
+    driver: "bridge"
